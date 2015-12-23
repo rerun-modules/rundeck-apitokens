@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+
+#/ command: rundeck-apitokens:list: "list the tokens"
+#/ usage: rerun rundeck-apitokens:list  --url <$RUNDECK_URL> [ --username <$RUNDECK_USER>] [ --password <$RUNDECK_PASSWORD>] [ --apikey <$RUNDECK_APIKEY>]  --token-user <> 
+#/ rerun-variables: RERUN, RERUN_VERSION, RERUN_MODULES, RERUN_MODULE_DIR
+#/ option-variables: URL USERNAME PASSWORD APIKEY TOKEN_USER
+
+. $RERUN_MODULE_DIR/lib/functions.sh list || { 
+  echo >&2 "Failed loading function library." ; exit 1 ; 
+}
+
+set -o errexit -o nounset -o pipefail
+
+rerun_options_parse "$@"
+
+CURL_OUT=$(mktemp -t curl.out.XXXXXXXXXX)
+trap 'rm $CURL_OUT' EXIT; # cleanup on exit
+
+rundeck_authenticate -u "$URL" -U "${USERNAME:-}" -p "${PASSWORD:-}" -k "${APIKEY:-}"
+
+if [[ ${TOKEN_USER} = '*' ]]
+then
+	APIURL=${URL}/api/12/tokens
+	xpath_select() {		
+		xmlstarlet sel -t -m "//token" -v @user -o " " -v @id -n $CURL_OUT
+	}
+else
+	APIURL=${URL}/api/12/tokens/$TOKEN_USER
+	xpath_select() {
+		xmlstarlet sel -t -m "//token[@user='$TOKEN_USER']" -v @id -n $CURL_OUT		
+	}
+fi	
+
+if ! http_code=$(rundeck_curl -w "%{http_code}" -H 'Accept: application/xml' \
+	-X  GET "${APIURL}" -o "$CURL_OUT") 
+then
+	rerun_die 3 "curl request failed (exit code: $?)"
+fi
+#xmlstarlet fo $CURL_OUT
+
+case ${http_code:-} in
+	200) : ;; # successful
+	40*) rerun_die 3 "$(xmlstarlet sel -t -m //error -v message $CURL_OUT)" ;;
+	* ) rerun_die 3 "API error $http_code: POST ${APIURL})." ;;
+esac  
+
+# List the tokens.
+if ! xpath_select
+then
+    :; # no tokens
+fi
+
+exit $?

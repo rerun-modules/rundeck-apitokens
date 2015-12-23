@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+#/ command: rundeck-apitokens:delete: "delete a token"
+#/ usage: rerun rundeck-apitokens:delete  --token-user <>  --url <$RUNDECK_URL> [ --username <$RUNDECK_USER>] [ --password <$RUNDECK_PASSWORD>] [ --apikey <$RUNDECK_APIKEY>]  --token-id <> 
+#/ rerun-variables: RERUN, RERUN_VERSION, RERUN_MODULES, RERUN_MODULE_DIR
+#/ option-variables: TOKEN_USER URL USERNAME PASSWORD APIKEY TOKEN_ID
+
+. $RERUN_MODULE_DIR/lib/functions.sh delete || { 
+  echo >&2 "Failed loading function library." ; exit 1 ; 
+}
+
+set -o errexit -o nounset -o pipefail
+
+rerun_options_parse "$@"
+
+CURL_OUT=$(mktemp -t curl.out.XXXXXXXXXX)
+trap 'rm $CURL_OUT' EXIT; # cleanup on exit
+
+rundeck_authenticate -u "$URL" -U "${USERNAME:-}" -p "${PASSWORD:-}" -k "${APIKEY:-}"
+APIURL=${URL}/api/11/token/$TOKEN_ID
+if ! http_code=$(rundeck_curl -w "%{http_code}" \
+    -H 'Accept: application/xml' \
+    -X DELETE "${APIURL}" -o $CURL_OUT)
+then
+	rerun_die 3 "curl request failed (exit code: $?)"
+fi
+
+
+case ${http_code:-} in
+	204) : ;; # successful
+	40*) rerun_die 3 "$(xmlstarlet sel -t -m //error -v message $CURL_OUT)" ;;
+	* ) rerun_die 3 "API error $http_code: POST ${APIURL})." ;;
+esac  
+
+
+# Done. Exit with last command exit status.
+exit $?
+
